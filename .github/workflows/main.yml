@@ -1,37 +1,72 @@
 name: Build Aero Browser EXE
 on: [push, workflow_dispatch]
+
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022  # PINNED - not windows-latest which breaks
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup MSVC
+      - name: Setup Python 3.11 (stable)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Setup MSVC 2022
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+          vsversion: '2022'
 
-      - name: Install Qt via aqt
+      - name: Cache Qt
+        id: cache-qt
+        uses: actions/cache@v4
+        with:
+          path: C:\Qt
+          key: qt-6.8.3-msvc2022_64-webengine-v2
+
+      - name: Install Qt 6.8.3 (LTS) with WebEngine
+        if: steps.cache-qt.outputs.cache-hit != 'true'
         run: |
+          python -m pip install --upgrade pip
           pip install aqtinstall
-          aqt install-qt windows desktop 6.7.3 win64_msvc2022_64 --modules qtwebengine --outputdir C:\Qt
-          echo "Qt6_DIR=C:\Qt\6.7.3\msvc2022_64" >> $env:GITHUB_ENV
-          echo "C:\Qt\6.7.3\msvc2022_64\bin" >> $env:GITHUB_PATH
+          aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --modules qtwebengine --outputdir C:\Qt
 
-      - name: Configure CMake
-        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:\Qt\6.7.3\msvc2022_64"
+      - name: Set Qt Env
+        run: |
+          echo "Qt6_DIR=C:\Qt\6.8.3\msvc2022_64" >> $env:GITHUB_ENV
+          echo "QT_ROOT=C:\Qt\6.8.3\msvc2022_64" >> $env:GITHUB_ENV
+          echo "C:\Qt\6.8.3\msvc2022_64\bin" >> $env:GITHUB_PATH
+
+      - name: Configure (with logs on fail)
+        run: |
+          cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:\Qt\6.8.3\msvc2022_64" --debug-find
+          if ($LASTEXITCODE -ne 0) { Get-Content build/CMakeFiles/CMakeOutput.log; Get-Content build/CMakeFiles/CMakeError.log; exit 1 }
 
       - name: Build Release
-        run: cmake --build build --config Release -j
+        run: cmake --build build --config Release -j 4
 
       - name: Deploy Qt DLLs
-        run: C:\Qt\6.7.3\msvc2022_64\bin\windeployqt.exe build/Release/AeroBrowser.exe --release --webengine --no-translations --no-system-d3d-compiler
+        run: C:\Qt\6.8.3\msvc2022_64\bin\windeployqt.exe build/Release/AeroBrowser.exe --release --webengine --no-translations --no-system-d3d-compiler --no-opengl-sw --no-quick-import
 
-      - name: Zip EXE + DLLs
-        run: Compress-Archive -Path build/Release/* -DestinationPath AeroBrowser-Windows.zip
+      - name: Create Portable Zip
+        run: |
+          Compress-Archive -Path build/Release/* -DestinationPath AeroBrowser-Windows.zip -Force
+          dir build/Release
 
-      - name: Upload EXE
+      - name: Upload EXE Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AeroBrowser-Windows
+          name: AeroBrowser-Windows-Portable
           path: AeroBrowser-Windows.zip
+          retention-days: 30
+
+      - name: Upload Logs on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-logs
+          path: |
+            build/CMakeFiles/*.log
+            build/CMakeCache.txt
