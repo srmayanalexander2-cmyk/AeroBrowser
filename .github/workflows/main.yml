@@ -8,27 +8,28 @@ jobs:
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.3'
-          arch: 'win64_msvc2022_64'
-          modules: 'qtwebengine'
-          cache: true
-          
+          arch: x64
+
+      - name: Install Qt via aqt
+        run: |
+          pip install aqtinstall
+          aqt install-qt windows desktop 6.7.3 win64_msvc2022_64 --modules qtwebengine --outputdir C:\Qt
+          echo "Qt6_DIR=C:\Qt\6.7.3\msvc2022_64" >> $env:GITHUB_ENV
+          echo "C:\Qt\6.7.3\msvc2022_64\bin" >> $env:GITHUB_PATH
+
       - name: Configure CMake
-        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="${{env.Qt6_DIR}}"
-        
+        run: cmake -B build -S . -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:\Qt\6.7.3\msvc2022_64"
+
       - name: Build Release
         run: cmake --build build --config Release -j
-        
+
       - name: Deploy Qt DLLs
-        run: ${{env.Qt6_DIR}}/bin/windeployqt.exe build/Release/AeroBrowser.exe --release --webengine --no-translations
-        
+        run: C:\Qt\6.7.3\msvc2022_64\bin\windeployqt.exe build/Release/AeroBrowser.exe --release --webengine --no-translations --no-system-d3d-compiler
+
       - name: Zip EXE + DLLs
         run: Compress-Archive -Path build/Release/* -DestinationPath AeroBrowser-Windows.zip
-        
+
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
